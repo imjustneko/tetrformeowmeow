@@ -1,0 +1,39 @@
+# Dependencies
+**/node_modules/
+
+# Environment & secrets — never commit real values
+.env
+.env.local
+.env.*.local
+# Keep example templates
+!.env.example
+!**/.env.example
+
+# Builds & caches
+**/.next/
+**/out/
+**/dist/
+**/build/
+**/.turbo/
+*.tsbuildinfo
+
+# Tools / OS
+.DS_Store
+Thumbs.db
+*.pem
+.vercel
+
+# Logs & debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Prisma (generated client is from npm; keep migrations committed)
+# backend/node_modules/.prisma is inside node_modules/
