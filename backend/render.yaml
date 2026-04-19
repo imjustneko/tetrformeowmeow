@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: meowtetr-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build && npx prisma generate
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: meowtetr-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: PORT
+        value: "4000"
+
+databases:
+  - name: meowtetr-db
+    databaseName: postgres
+    user: postgres
+    region: singapore
+    ipAllowList: []
