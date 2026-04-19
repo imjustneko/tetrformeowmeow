@@ -16,5 +16,8 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      # Lets CORS accept meowtetr.vercel.app + meowtetr-*.vercel.app even if FRONTEND_URL is unset in the dashboard.
+      - key: VERCEL_PROJECT_SLUG
+        value: meowtetr
       - key: PORT
         value: "4000"

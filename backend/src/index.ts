@@ -135,6 +135,37 @@ app.use('/api/users', userRoutes);
 initSocket(io);
 
 const PORT = process.env.PORT || 4000;
+
+function logCorsBootstrap(): void {
+  console.log(`[CORS] Exact allowlist: ${frontendOrigins.join(', ')}`);
+  if (vercelProjectSlug && allowVercelPreviewOrigins) {
+    console.log(
+      `[CORS] Vercel hosts allowed for slug "${vercelProjectSlug}": ${vercelProjectSlug}.vercel.app and ${vercelProjectSlug}-*.vercel.app`
+    );
+  } else if (process.env.NODE_ENV === 'production') {
+    console.warn(
+      '[CORS] No Vercel slug (set FRONTEND_URL to https://<project>.vercel.app and/or VERCEL_PROJECT_SLUG=<project>). Preview deploy URLs will be blocked.'
+    );
+  }
+  const isLocalhostOrigin = (o: string): boolean => {
+    try {
+      return /localhost|127\.0\.0\.1/.test(new URL(o).hostname);
+    } catch {
+      return false;
+    }
+  };
+  if (
+    process.env.NODE_ENV === 'production' &&
+    frontendOrigins.every(isLocalhostOrigin) &&
+    !allowVercelPreviewOrigins
+  ) {
+    console.warn(
+      '[CORS] FRONTEND_URL is localhost-only and Vercel previews are off — browsers on Vercel cannot call this API until you set FRONTEND_URL or VERCEL_PROJECT_SLUG on Render.'
+    );
+  }
+}
+
 httpServer.listen(PORT, () => {
   console.log(`🐱 MeowTetr backend running on port ${PORT}`);
+  logCorsBootstrap();
 });
