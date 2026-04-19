@@ -34,18 +34,29 @@ const frontendOrigins = parseFrontendOrigins();
  * Infer Vercel project slug from FRONTEND_URL (e.g. https://meowtetr.vercel.app → meowtetr).
  * Override with VERCEL_PROJECT_SLUG when needed.
  */
+function normalizeSlug(raw: string): string {
+  return raw.trim().replace(/^["']|["']$/g, '').toLowerCase();
+}
+
 function inferVercelProjectSlug(): string | null {
   const explicit = process.env.VERCEL_PROJECT_SLUG?.trim();
-  if (explicit) return explicit;
+  if (explicit) {
+    const s = normalizeSlug(explicit);
+    return s || null;
+  }
   for (const url of frontendOrigins) {
     try {
-      const host = new URL(url).hostname;
+      const host = new URL(url).hostname.toLowerCase();
       if (!host.endsWith('.vercel.app')) continue;
       const base = host.slice(0, -'.vercel.app'.length);
       if (!base) continue;
-      if (base.includes('-git-')) return base.split('-git-')[0] || null;
-      if (!base.includes('-')) return base;
-      return base.split('-')[0] || null;
+      if (base.includes('-git-')) {
+        const s = normalizeSlug(base.split('-git-')[0] || '');
+        return s || null;
+      }
+      if (!base.includes('-')) return base.toLowerCase();
+      const s = normalizeSlug(base.split('-')[0] || '');
+      return s || null;
     } catch {
       /* skip */
     }
@@ -59,20 +70,40 @@ const allowVercelPreviewOrigins =
   vercelProjectSlug !== null && process.env.VERCEL_PREVIEW_CORS !== '0';
 
 function hostMatchesVercelProject(host: string, slug: string): boolean {
-  return host === `${slug}.vercel.app` || (host.startsWith(`${slug}-`) && host.endsWith('.vercel.app'));
+  const h = host.toLowerCase();
+  const s = slug.toLowerCase();
+  return h === `${s}.vercel.app` || (h.startsWith(`${s}-`) && h.endsWith('.vercel.app'));
 }
 
 function isAllowedCorsOrigin(origin: string | undefined): boolean {
   if (!origin) return true;
-  if (frontendOrigins.includes(origin)) return true;
+  const normalized = normalizeFrontendOrigin(origin);
+  if (frontendOrigins.includes(normalized)) return true;
   if (!allowVercelPreviewOrigins || !vercelProjectSlug) return false;
   try {
-    const host = new URL(origin).hostname;
+    const host = new URL(normalized).hostname;
     return hostMatchesVercelProject(host, vercelProjectSlug);
   } catch {
     return false;
   }
 }
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, cb) => {
+    if (isAllowedCorsOrigin(origin)) {
+      cb(null, true);
+    } else {
+      console.warn(
+        `[CORS] Blocked HTTP origin: ${origin ?? '(none)'} (allowlist: ${frontendOrigins.join(' | ')}${allowVercelPreviewOrigins ? ` + Vercel "${vercelProjectSlug}"` : ''})`
+      );
+      cb(null, false);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 204,
+};
 
 const app = express();
 const httpServer = createServer(app);
@@ -90,24 +121,13 @@ const io = new Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, { us
         }
       },
       credentials: true,
+      methods: ['GET', 'POST', 'OPTIONS'],
     },
   }
 );
 
 // Middleware
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (isAllowedCorsOrigin(origin)) {
-        cb(null, true);
-      } else {
-        console.warn(`[CORS] Blocked HTTP origin: ${origin ?? '(none)'} (allowed: ${frontendOrigins.join(' | ')}${allowVercelPreviewOrigins ? ` + Vercel previews for "${vercelProjectSlug}"` : ''})`);
-        cb(null, false);
-      }
-    },
-    credentials: true,
-  })
-);
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -125,6 +145,17 @@ app.get('/health/db', async (_, res) => {
     console.error('[health/db]', err);
     res.status(503).json({ status: 'error', database: 'unreachable' });
   }
+});
+
+/** What the running server uses for CORS (no secrets). Open this on Render if register/login still show CORS in DevTools. */
+app.get('/health/cors', (_, res) => {
+  res.json({
+    exactOrigins: frontendOrigins,
+    vercelProjectSlug,
+    allowVercelPreviewOrigins,
+    vercelPreviewCorsEnv: process.env.VERCEL_PREVIEW_CORS ?? '(unset)',
+    nodeEnv: process.env.NODE_ENV ?? '(unset)',
+  });
 });
 
 // Routes
