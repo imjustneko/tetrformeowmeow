@@ -235,25 +235,20 @@ export class GameEngine {
 
   private spawnSpecificPiece(type: PieceType): void {
     const spawnPos = getSpawnPosition(type);
-    let piece: ActivePiece = {
+    const piece: ActivePiece = {
       type,
       rotation: 0,
       position: spawnPos,
     };
 
+    // Strict lock-out behavior (TETR.IO-like):
+    // if a new piece cannot spawn in the spawn zone, the game ends immediately.
     if (!isValidPosition(this.state.board, piece)) {
-      const nudged: ActivePiece = {
-        ...piece,
-        position: { ...piece.position, y: piece.position.y - 1 },
-      };
-      if (!isValidPosition(this.state.board, nudged)) {
-        this.state.isGameOver = true;
-        this.state.activePiece = null;
-        this.onGameOver({ ...this.state });
-        cancelAnimationFrame(this.animFrameId);
-        return;
-      }
-      piece = nudged;
+      this.state.isGameOver = true;
+      this.state.activePiece = null;
+      this.onGameOver({ ...this.state });
+      cancelAnimationFrame(this.animFrameId);
+      return;
     }
 
     this.state.activePiece = piece;

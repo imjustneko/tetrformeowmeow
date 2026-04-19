@@ -42,33 +42,38 @@ export default function MultiplayerPage() {
                 : 'Single ranked match. Ready up, survive garbage, and top your opponent out.'}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setQueueMode('ranked')}
-              className={`border px-3 py-1.5 text-xs font-bold uppercase tracking-wider ${
-                queueMode === 'ranked'
-                  ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-200'
-                  : 'border-white/15 bg-black/25 text-zinc-300'
-              }`}
-            >
-              Ranked (BO1)
-            </button>
-            <button
-              type="button"
-              onClick={() => setQueueMode('league')}
-              className={`border px-3 py-1.5 text-xs font-bold uppercase tracking-wider ${
-                queueMode === 'league'
-                  ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-200'
-                  : 'border-white/15 bg-black/25 text-zinc-300'
-              }`}
-            >
-              League (BO3)
-            </button>
-            <Link href="/multiplayer/custom">
-              <Button variant="secondary">Private room</Button>
-            </Link>
-          </div>
+          <Link href="/multiplayer/custom">
+            <Button variant="secondary">Private room</Button>
+          </Link>
+        </div>
+
+        <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setQueueMode('ranked')}
+            className={`rounded-lg border p-3 text-left ${
+              queueMode === 'ranked'
+                ? 'border-cyan-500/60 bg-cyan-500/10'
+                : 'border-white/15 bg-black/25 hover:border-white/30'
+            }`}
+          >
+            <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Queue mode</p>
+            <p className="mt-1 text-sm font-black text-white">Ranked (BO1)</p>
+            <p className="mt-1 text-xs text-zinc-400">Single match, quick ELO update.</p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setQueueMode('league')}
+            className={`rounded-lg border p-3 text-left ${
+              queueMode === 'league'
+                ? 'border-cyan-500/60 bg-cyan-500/10'
+                : 'border-white/15 bg-black/25 hover:border-white/30'
+            }`}
+          >
+            <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Queue mode</p>
+            <p className="mt-1 text-sm font-black text-white">League (BO3)</p>
+            <p className="mt-1 text-xs text-zinc-400">First to 2 rounds wins, ELO settles at set end.</p>
+          </button>
         </div>
 
         <VersusClient mode={queueMode} startWith="queue" currentUserId={user.id} />
