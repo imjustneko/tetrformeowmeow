@@ -9,6 +9,7 @@ dotenv.config();
 
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
+import trainingRoutes from './routes/training';
 import { initSocket } from './socket';
 import type { JwtPayload } from './types';
 import { prisma } from './lib/prisma';
@@ -161,6 +162,7 @@ app.get('/health/cors', (_, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/training', trainingRoutes);
 
 // Socket.IO
 initSocket(io);

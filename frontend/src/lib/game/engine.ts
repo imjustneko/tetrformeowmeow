@@ -39,6 +39,8 @@ export class GameEngine {
   onGarbageSend: (lines: number) => void = () => {};
   /** Fired after a new active piece is placed (for IRS / handling UI). */
   onPieceSpawn: () => void = () => {};
+  /** Fired when a piece locks (clear result may be null when no clear). */
+  onPieceLock: (piece: ActivePiece, clear: ClearResult | null) => void = () => {};
 
   constructor(mode: GameMode) {
     this.mode = mode;
@@ -103,6 +105,25 @@ export class GameEngine {
       );
       this.onStateChange({ ...this.state });
     }
+  }
+
+  /**
+   * Override practice state before `start()` (board/queue/hold).
+   * Useful for training lessons with fixed setups.
+   */
+  setPracticeSetup(setup: {
+    board?: GameState['board'];
+    nextQueue?: PieceType[];
+    heldPiece?: PieceType | null;
+    canHold?: boolean;
+  }): void {
+    if (setup.board) this.state.board = setup.board.map((row) => [...row]);
+    if (setup.nextQueue?.length) {
+      this.state.nextQueue = [...setup.nextQueue];
+    }
+    if (setup.heldPiece !== undefined) this.state.heldPiece = setup.heldPiece;
+    if (setup.canHold !== undefined) this.state.canHold = setup.canHold;
+    this.onStateChange({ ...this.state });
   }
 
   receiveGarbage(lines: number): void {
@@ -290,6 +311,12 @@ export class GameEngine {
     const { activePiece, board } = this.state;
     if (!activePiece) return;
 
+    const lockedPiece: ActivePiece = {
+      ...activePiece,
+      position: { ...activePiece.position },
+      rotation: activePiece.rotation,
+    };
+    const previousClearRef = this.state.lastClear;
     const { isTSpin, isMiniTSpin } = detectTSpin(board, activePiece, this.lastMoveWasRotation);
 
     const newBoard = lockPiece(board, activePiece);
@@ -321,6 +348,8 @@ export class GameEngine {
 
     if (this.checkModeCompletion()) return;
 
+    const lockClear = this.state.lastClear === previousClearRef ? null : this.state.lastClear;
+    this.onPieceLock(lockedPiece, lockClear);
     this.spawnPiece();
     this.onStateChange({ ...this.state });
   }
