@@ -190,6 +190,9 @@ export class TrainingEngine {
   softDrop(): void {
     this.innerEngine.softDrop();
   }
+  sonicSoftDrop(): void {
+    this.innerEngine.sonicSoftDrop();
+  }
   hardDrop(): void {
     this.innerEngine.hardDrop();
   }

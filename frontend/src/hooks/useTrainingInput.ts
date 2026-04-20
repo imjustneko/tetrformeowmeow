@@ -31,7 +31,7 @@ export function useTrainingInput(engineRef: RefObject<TrainingEngine | null>, ac
           engine.moveRight();
           break;
         case 'softDrop':
-          if (softDropFactor === 0) engine.hardDrop();
+          if (softDropFactor === 0) engine.sonicSoftDrop();
           else engine.softDrop();
           break;
         case 'hardDrop':
