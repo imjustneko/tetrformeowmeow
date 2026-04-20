@@ -78,7 +78,7 @@ export function useTrainingInput(
 
     // Track movement key codes for continuous processing
     const movementDasTimes = new Map<string, number>();
-    const movementArrsHandled = new Map<string, number>();
+    const movementDasFired = new Map<string, number>(); // Track when DAS expired for each key
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
@@ -91,7 +91,7 @@ export function useTrainingInput(
       if (action === 'moveLeft' || action === 'moveRight') {
         handleAction(action);
         movementDasTimes.set(e.code, performance.now());
-        movementArrsHandled.set(e.code, 0);
+        movementDasFired.delete(e.code);
         return;
       }
       
@@ -124,34 +124,36 @@ export function useTrainingInput(
       // Clean up movement tracking
       if (action === 'moveLeft' || action === 'moveRight') {
         movementDasTimes.delete(e.code);
-        movementArrsHandled.delete(e.code);
+        movementDasFired.delete(e.code);
       }
     };
 
     // Process movement continuously via RAF for smooth, uninterruptible input
     let lastMovementTick = performance.now();
     const processMovementFrame = (now: number) => {
-      const dt = Math.min(now - lastMovementTick, 50);
       lastMovementTick = now;
 
       for (const [code, dasStart] of movementDasTimes.entries()) {
         const action = keyToAction[code];
         if (!action || !heldKeys.current.has(code)) {
           movementDasTimes.delete(code);
-          movementArrsHandled.delete(code);
+          movementDasFired.delete(code);
           continue;
         }
 
         const timeSinceDas = now - dasStart;
         if (timeSinceDas >= das) {
-          const arrTime = timeSinceDas - das;
-          const arrInterval = arr === 0 ? 1 : arr;
-          const arrCount = Math.floor(arrTime / arrInterval);
-          const prevCount = movementArrsHandled.get(code) || 0;
-
-          if (arrCount > prevCount) {
+          if (!movementDasFired.has(code)) {
+            // First time crossing DAS threshold - fire immediately
             handleAction(action);
-            movementArrsHandled.set(code, arrCount);
+            movementDasFired.set(code, now);
+          } else {
+            // After first DAS fire, check ARR interval
+            const lastFire = movementDasFired.get(code)!;
+            if (now - lastFire >= arr) {
+              handleAction(action);
+              movementDasFired.set(code, now);
+            }
           }
         }
       }
@@ -173,7 +175,7 @@ export function useTrainingInput(
       heldKeys.current.clear();
       clearAllTimers();
       movementDasTimes.clear();
-      movementArrsHandled.clear();
+      movementDasFired.clear();
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -189,7 +191,7 @@ export function useTrainingInput(
       clearAllTimers();
       clearHeldKeys();
       movementDasTimes.clear();
-      movementArrsHandled.clear();
+      movementDasFired.clear();
     };
   }, [active, keybinds, das, arr, handleAction, clearKeyTimers, clearAllTimers, clearHeldKeys]);
 }
