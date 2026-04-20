@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useGameEngine } from '@/hooks/useGameEngine';
 import { usePlayfieldCellSize } from '@/hooks/usePlayfieldCellSize';
 import { useHoldEscToHub } from '@/hooks/useHoldEscToHub';
+import { useCtrlRRestart } from '@/hooks/useCtrlRRestart';
 import { GameCanvas } from '@/components/game/GameCanvas';
 import { GamePlayfield } from '@/components/game/GamePlayfield';
 import { HoldEscOverlay } from '@/components/game/HoldEscOverlay';
@@ -156,13 +157,17 @@ export default function TrainPage() {
   const [showXray, setShowXray] = useState(true);
   const selectedDrill = DRILLS.find((d) => d.id === selectedDrillId) ?? DRILLS[0];
   const currentStep = selectedDrill.steps[currentStepIndex] ?? selectedDrill.steps[selectedDrill.steps.length - 1];
+  const remainingGuidedPieces = useMemo(
+    () => selectedDrill.steps.slice(currentStepIndex).map((step) => step.piece),
+    [selectedDrill, currentStepIndex]
+  );
   const mode = useMemo(() => ({ type: 'practice' as const }), []);
   const cellSize = usePlayfieldCellSize();
   const previousPlacedRef = useRef(0);
   const previousBoardRef = useRef<Board | null>(null);
 
   const { gameState, isActive, isFinished, finalState, startGame, restartGame, engineRef } = useGameEngine(mode, {
-    practiceSequence: [currentStep.piece],
+    practiceSequence: remainingGuidedPieces,
     onStateTick: (state) => {
       if (state.piecesPlaced <= previousPlacedRef.current || isCompleted) return;
       previousPlacedRef.current = state.piecesPlaced;
@@ -187,6 +192,7 @@ export default function TrainPage() {
   });
 
   const escProgress = useHoldEscToHub(isActive || isFinished);
+  useCtrlRRestart({ enabled: isActive || isFinished, onRestart: retryDrill });
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -207,8 +213,9 @@ export default function TrainPage() {
   }, [gameState]);
 
   useEffect(() => {
-    engineRef.current?.setPracticeSequence([currentStep.piece], true);
-  }, [currentStep.piece, engineRef]);
+    if (!remainingGuidedPieces.length) return;
+    engineRef.current?.setPracticeSequence(remainingGuidedPieces, false);
+  }, [remainingGuidedPieces, engineRef]);
 
   function startDrill() {
     setCurrentStepIndex(0);
@@ -302,6 +309,33 @@ export default function TrainPage() {
               <p className="mt-1 text-xs text-zinc-500">{drill.steps.length} guided steps</p>
             </button>
           ))}
+        </div>
+
+        <div className="mb-3 rounded-sm border border-white/10 bg-black/25 px-3 py-2">
+          <p className="text-xs uppercase tracking-wide text-zinc-500">Full guide</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            {selectedDrill.steps.map((step, idx) => {
+              const done = idx < currentStepIndex || isCompleted;
+              const active = idx === currentStepIndex && !isCompleted;
+              return (
+                <div
+                  key={`${selectedDrill.id}-step-${idx}`}
+                  className={`rounded-sm border px-2 py-2 ${
+                    done
+                      ? 'border-emerald-400/40 bg-emerald-500/10'
+                      : active
+                        ? 'border-cyan-500/50 bg-cyan-500/10'
+                        : 'border-white/10 bg-black/20'
+                  }`}
+                >
+                  <p className="text-[0.65rem] font-bold uppercase tracking-wide text-zinc-300">
+                    Step {idx + 1} · {step.piece}
+                  </p>
+                  <p className="mt-1 text-[0.7rem] text-zinc-400">{step.instruction}</p>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {isCompleted ? (

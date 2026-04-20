@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useGameEngine } from '@/hooks/useGameEngine';
 import { useHoldEscToHub } from '@/hooks/useHoldEscToHub';
 import { usePlayfieldCellSize } from '@/hooks/usePlayfieldCellSize';
+import { useCtrlRRestart } from '@/hooks/useCtrlRRestart';
 import { GameCanvas } from '@/components/game/GameCanvas';
 import { NextQueue } from '@/components/game/NextQueue';
 import { HoldBox } from '@/components/game/HoldBox';
@@ -27,6 +28,7 @@ export default function SoloPage() {
 
   const { gameState, isActive, isFinished, finalState, startGame, restartGame } = useGameEngine(mode);
   const escProgress = useHoldEscToHub(isActive || isFinished);
+  useCtrlRRestart({ enabled: isActive || isFinished, onRestart: restartGame });
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) router.push('/login');
