@@ -22,49 +22,61 @@ export function createIrsInputRef(): IrsInputRef {
   };
 }
 
+export interface InputSoundCallbacks {
+  onMove?: () => void;
+  onRotate?: () => void;
+  onSoftDrop?: () => void;
+  onHardDrop?: () => void;
+  onHold?: () => void;
+}
+
 export function useGameInput(
   engineRef: RefObject<GameEngine | null>,
   active: boolean,
-  irsInputRef: RefObject<IrsInputRef>
+  irsInputRef: RefObject<IrsInputRef>,
+  sounds?: InputSoundCallbacks
 ) {
   const keybinds = useSettingsStore((s) => s.keybinds);
 
-  const softTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hardHoldTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dasTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dcdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const arrTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const leftHeld = useRef(false);
-  const rightHeld = useRef(false);
-  const downHeld = useRef(false);
-  const activeHoriz = useRef<'left' | 'right' | null>(null);
-
-  const clearSoft = useCallback(() => {
-    if (softTimer.current) clearTimeout(softTimer.current);
-    softTimer.current = null;
-  }, []);
+  const heldKeys = useRef<Set<string>>(new Set());
+  const dasTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const arrIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const softDropInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clearHardHold = useCallback(() => {
     if (hardHoldTimer.current) clearTimeout(hardHoldTimer.current);
     hardHoldTimer.current = null;
   }, []);
 
-  const clearHoriz = useCallback(() => {
-    if (dasTimer.current) clearTimeout(dasTimer.current);
-    if (dcdTimer.current) clearTimeout(dcdTimer.current);
-    if (arrTimer.current) clearTimeout(arrTimer.current);
-    dasTimer.current = null;
-    dcdTimer.current = null;
-    arrTimer.current = null;
-    activeHoriz.current = null;
+  const clearKeyTimers = useCallback((code: string) => {
+    const dt = dasTimers.current.get(code);
+    if (dt) {
+      clearTimeout(dt);
+      dasTimers.current.delete(code);
+    }
+    const ai = arrIntervals.current.get(code);
+    if (ai) {
+      clearInterval(ai);
+      arrIntervals.current.delete(code);
+    }
   }, []);
 
   const clearAll = useCallback(() => {
-    clearSoft();
+    dasTimers.current.forEach((t) => clearTimeout(t));
+    arrIntervals.current.forEach((t) => clearInterval(t));
+    dasTimers.current.clear();
+    arrIntervals.current.clear();
     clearHardHold();
-    clearHoriz();
-  }, [clearSoft, clearHardHold, clearHoriz]);
+    if (softDropInterval.current) {
+      clearInterval(softDropInterval.current);
+      softDropInterval.current = null;
+    }
+  }, [clearHardHold]);
+
+  const clearHeldKeys = useCallback(() => {
+    heldKeys.current.clear();
+  }, []);
 
   const handleAction = useCallback(
     (action: string) => {
@@ -73,9 +85,11 @@ export function useGameInput(
       switch (action) {
         case 'moveLeft':
           engine.moveLeft();
+          sounds?.onMove?.();
           break;
         case 'moveRight':
           engine.moveRight();
+          sounds?.onMove?.();
           break;
         case 'softDrop':
           engine.softDrop();
@@ -85,74 +99,29 @@ export function useGameInput(
           break;
         case 'hardDrop':
           engine.hardDrop();
+          sounds?.onHardDrop?.();
           break;
         case 'rotateClockwise':
           engine.rotateClockwise();
+          sounds?.onRotate?.();
           break;
         case 'rotateCounter':
           engine.rotateCounter();
+          sounds?.onRotate?.();
           break;
         case 'rotate180':
           engine.rotate180();
+          sounds?.onRotate?.();
           break;
         case 'hold':
           engine.hold();
+          sounds?.onHold?.();
           break;
         default:
           break;
       }
     },
-    [engineRef]
-  );
-
-  const scheduleArr = useCallback(
-    (action: 'moveLeft' | 'moveRight') => {
-      const step = () => {
-        const st = useSettingsStore.getState();
-        const delay = Math.max(1, st.arr <= 0 ? 1 : st.arr);
-        arrTimer.current = setTimeout(() => {
-          if (!engineRef.current) return;
-          const st2 = useSettingsStore.getState();
-          if (st2.handling.preferSoftDropOverMovement && downHeld.current) {
-            step();
-            return;
-          }
-          handleAction(action);
-          step();
-        }, delay);
-      };
-      step();
-    },
-    [engineRef, handleAction]
-  );
-
-  const beginHorizontal = useCallback(
-    (dir: 'left' | 'right') => {
-      const st = useSettingsStore.getState();
-      if (st.handling.preferSoftDropOverMovement && downHeld.current) return;
-
-      clearHoriz();
-      activeHoriz.current = dir;
-
-      const otherHeld = dir === 'left' ? rightHeld.current : leftHeld.current;
-      const dcdMs =
-        st.handling.cancelDASOnDirectionChange && otherHeld ? 0 : otherHeld ? st.handling.dcd : 0;
-
-      const startDas = () => {
-        const s2 = useSettingsStore.getState();
-        const d = Math.max(0, s2.das);
-        dasTimer.current = setTimeout(() => {
-          scheduleArr(dir === 'left' ? 'moveLeft' : 'moveRight');
-        }, d);
-      };
-
-      if (dcdMs > 0) {
-        dcdTimer.current = setTimeout(startDas, dcdMs);
-      } else {
-        startDas();
-      }
-    },
-    [clearHoriz, scheduleArr]
+    [engineRef, sounds]
   );
 
   useEffect(() => {
@@ -179,9 +148,8 @@ export function useGameInput(
 
       const action = keyToAction[e.code];
       if (!action) return;
-      if (e.repeat && (action === 'moveLeft' || action === 'moveRight' || action === 'softDrop')) {
-        return;
-      }
+      if (heldKeys.current.has(e.code)) return;
+      heldKeys.current.add(e.code);
 
       const st = useSettingsStore.getState();
 
@@ -209,7 +177,6 @@ export function useGameInput(
       }
 
       if (action === 'hardDrop') {
-        if (e.repeat) return;
         if (st.handling.preventAccidentalHardDrop) {
           if (hardHoldTimer.current) return;
           /** ~12f @ 60Hz — tap Space will not lock; hold to hard-drop (TETR.IO-style). */
@@ -224,40 +191,51 @@ export function useGameInput(
       }
 
       if (action === 'softDrop') {
-        downHeld.current = true;
+        sounds?.onSoftDrop?.();
         if (st.softDropFactor <= 0) {
           handleAction('sonicSoftDrop');
         } else {
-          clearSoft();
-          const ms = Math.max(2, Math.floor(520 / Math.max(1, st.softDropFactor)));
-          const tick = () => {
-            handleAction('softDrop');
-            softTimer.current = setTimeout(tick, ms);
-          };
-          tick();
+          if (softDropInterval.current) clearInterval(softDropInterval.current);
+          const code = e.code;
+          softDropInterval.current = setInterval(() => {
+            if (heldKeys.current.has(code)) {
+              handleAction('softDrop');
+            } else if (softDropInterval.current) {
+              clearInterval(softDropInterval.current);
+              softDropInterval.current = null;
+            }
+          }, 50);
         }
         return;
       }
 
-      if (action === 'moveLeft') {
-        leftHeld.current = true;
-        handleAction('moveLeft');
-        clearHoriz();
-        beginHorizontal('left');
-        return;
-      }
+      handleAction(action);
 
-      if (action === 'moveRight') {
-        rightHeld.current = true;
-        handleAction('moveRight');
-        clearHoriz();
-        beginHorizontal('right');
+      if (action === 'moveLeft' || action === 'moveRight') {
+        clearKeyTimers(e.code);
+        const code = e.code;
+        const dasT = setTimeout(() => {
+          const ai = setInterval(() => {
+            if (heldKeys.current.has(code)) {
+              handleAction(action);
+            } else {
+              clearInterval(ai);
+              arrIntervals.current.delete(code);
+            }
+          }, st.arr === 0 ? 1 : st.arr);
+          arrIntervals.current.set(code, ai);
+          dasTimers.current.delete(code);
+        }, st.das);
+        dasTimers.current.set(code, dasT);
       }
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
       const action = keyToAction[e.code];
       if (!action) return;
+
+      heldKeys.current.delete(e.code);
+      clearKeyTimers(e.code);
 
       const r = ir();
       if (r) {
@@ -272,38 +250,18 @@ export function useGameInput(
       }
 
       if (action === 'softDrop') {
-        downHeld.current = false;
-        clearSoft();
-        if (leftHeld.current) {
-          clearHoriz();
-          beginHorizontal('left');
-        } else if (rightHeld.current) {
-          clearHoriz();
-          beginHorizontal('right');
+        if (softDropInterval.current) {
+          clearInterval(softDropInterval.current);
+          softDropInterval.current = null;
         }
         return;
-      }
-
-      if (action === 'moveLeft') {
-        leftHeld.current = false;
-        if (activeHoriz.current === 'left') clearHoriz();
-        if (rightHeld.current) beginHorizontal('right');
-        return;
-      }
-
-      if (action === 'moveRight') {
-        rightHeld.current = false;
-        if (activeHoriz.current === 'right') clearHoriz();
-        if (leftHeld.current) beginHorizontal('left');
       }
     };
 
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('keyup', onKeyUp, { capture: true });
     const onBlur = () => {
-      leftHeld.current = false;
-      rightHeld.current = false;
-      downHeld.current = false;
+      clearHeldKeys();
       clearAll();
     };
     window.addEventListener('blur', onBlur);
@@ -312,10 +270,8 @@ export function useGameInput(
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('keyup', onKeyUp, { capture: true });
       window.removeEventListener('blur', onBlur);
-      leftHeld.current = false;
-      rightHeld.current = false;
-      downHeld.current = false;
+      clearHeldKeys();
       clearAll();
     };
-  }, [active, keybinds, handleAction, clearAll, clearSoft, clearHoriz, clearHardHold, beginHorizontal, engineRef, irsInputRef]);
+  }, [active, keybinds, handleAction, clearAll, clearHardHold, clearHeldKeys, clearKeyTimers, irsInputRef, sounds]);
 }

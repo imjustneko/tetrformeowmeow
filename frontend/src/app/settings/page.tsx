@@ -13,6 +13,8 @@ import {
 import { Navbar } from '@/components/layout/Navbar';
 import { Button } from '@/components/ui/Button';
 import api from '@/lib/api';
+import { useAudioStore } from '@/store/audioStore';
+import { soundEngine } from '@/lib/audio/soundEngine';
 
 const ACTION_LABELS: Record<keyof Keybinds, string> = {
   moveLeft: 'Move left',
@@ -35,6 +37,7 @@ export default function SettingsPage() {
   const [rebinding, setRebinding] = useState<keyof Keybinds | null>(null);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const audioStore = useAudioStore();
 
   const keybinds = useSettingsStore((s) => s.keybinds);
   const das = useSettingsStore((s) => s.das);
@@ -274,20 +277,65 @@ export default function SettingsPage() {
         </Section>
 
         <Section title="Audio">
+          <div className="mb-3 flex items-center justify-between border-b border-[#2a2a3a] py-2">
+            <span className="text-gray-300">Music</span>
+            <button
+              onClick={audioStore.toggleMusic}
+              className={`rounded-lg border px-4 py-1 text-sm font-bold transition-colors ${
+                audioStore.musicEnabled
+                  ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-400'
+                  : 'border-[#2a2a3a] bg-[#1a1a28] text-gray-500'
+              }`}
+            >
+              {audioStore.musicEnabled ? 'ON' : 'OFF'}
+            </button>
+          </div>
           <SliderRow
             label="Music volume"
-            value={Math.round(musicVolume * 100)}
+            value={Math.round(audioStore.musicVolume * 100)}
             min={0}
             max={100}
-            onChange={(v) => setMusicVolume(v / 100)}
+            onChange={(v) => {
+              const next = v / 100;
+              audioStore.setMusicVolume(next);
+              setMusicVolume(next);
+            }}
           />
+          <div className="mb-3 mt-3 flex items-center justify-between border-b border-[#2a2a3a] py-2">
+            <span className="text-gray-300">Sound Effects</span>
+            <button
+              onClick={audioStore.toggleSfx}
+              className={`rounded-lg border px-4 py-1 text-sm font-bold transition-colors ${
+                audioStore.sfxEnabled
+                  ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-400'
+                  : 'border-[#2a2a3a] bg-[#1a1a28] text-gray-500'
+              }`}
+            >
+              {audioStore.sfxEnabled ? 'ON' : 'OFF'}
+            </button>
+          </div>
           <SliderRow
             label="SFX volume"
-            value={Math.round(sfxVolume * 100)}
+            value={Math.round(audioStore.sfxVolume * 100)}
             min={0}
             max={100}
-            onChange={(v) => setSfxVolume(v / 100)}
+            onChange={(v) => {
+              const next = v / 100;
+              audioStore.setSfxVolume(next);
+              setSfxVolume(next);
+            }}
           />
+          <div className="mt-4">
+            <button
+              onClick={() => {
+                audioStore.initAudio();
+                soundEngine.hardDrop();
+              }}
+              className="rounded-lg border border-[#2a2a3a] px-3 py-1.5 text-sm text-gray-500 transition-colors hover:text-white"
+            >
+              Test SFX
+            </button>
+          </div>
         </Section>
 
         <div className="mt-8 flex flex-wrap items-center gap-4">

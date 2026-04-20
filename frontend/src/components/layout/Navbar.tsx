@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useAuthStore } from '@/store/authStore';
 import { Button } from '@/components/ui/Button';
 import { useRouter } from 'next/navigation';
+import { useAudioStore } from '@/store/audioStore';
 
 export function Navbar() {
   const { user, isAuthenticated, logout } = useAuthStore();
@@ -45,6 +46,7 @@ export function Navbar() {
             >
               {user?.username}
             </Link>
+            <MuteButton />
             <Button variant="ghost" size="sm" type="button" onClick={handleLogout} className="uppercase">
               Logout
             </Button>
@@ -65,5 +67,30 @@ export function Navbar() {
         )}
       </div>
     </header>
+  );
+}
+
+function MuteButton() {
+  const { sfxEnabled, musicEnabled, toggleSfx, toggleMusic } = useAudioStore();
+  const allMuted = !sfxEnabled && !musicEnabled;
+
+  const handleToggle = () => {
+    if (allMuted) {
+      if (!sfxEnabled) toggleSfx();
+      if (!musicEnabled) toggleMusic();
+    } else {
+      if (sfxEnabled) toggleSfx();
+      if (musicEnabled) toggleMusic();
+    }
+  };
+
+  return (
+    <button
+      onClick={handleToggle}
+      className="text-lg text-gray-500 transition-colors hover:text-white"
+      title={allMuted ? 'Unmute' : 'Mute'}
+    >
+      {allMuted ? '🔇' : '🔊'}
+    </button>
   );
 }

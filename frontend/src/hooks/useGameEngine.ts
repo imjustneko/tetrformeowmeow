@@ -5,6 +5,9 @@ import { GameEngine } from '@/lib/game/engine';
 import type { GameState, GameMode, PieceType, ClearResult } from '@/lib/game/types';
 import { useSettingsStore } from '@/store/settingsStore';
 import { createIrsInputRef, useGameInput, type IrsInputRef } from './useGameInput';
+import { useGameSounds } from './useGameSounds';
+import { soundEngine } from '@/lib/audio/soundEngine';
+import { useAudioStore } from '@/store/audioStore';
 
 export type GameEngineCallbacks = {
   onGarbageSend?: (lines: number) => void;
@@ -23,8 +26,17 @@ export function useGameEngine(mode: GameMode, callbacks?: GameEngineCallbacks) {
   const [isActive, setIsActive] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
   const [finalState, setFinalState] = useState<GameState | null>(null);
+  const prevLevelRef = useRef(1);
+  const sounds = useGameSounds();
+  const { musicEnabled, musicVolume, initAudio } = useAudioStore();
 
-  useGameInput(engineRef, isActive, irsInputRef);
+  useGameInput(engineRef, isActive, irsInputRef, {
+    onMove: sounds.onMove,
+    onRotate: sounds.onRotate,
+    onSoftDrop: sounds.onSoftDrop,
+    onHardDrop: sounds.onHardDrop,
+    onHold: sounds.onHold,
+  });
 
   const modeType = mode.type;
   const targetLines = mode.targetLines;
@@ -38,9 +50,11 @@ export function useGameEngine(mode: GameMode, callbacks?: GameEngineCallbacks) {
     if (engineRef.current) {
       engineRef.current.stop();
     }
+    initAudio();
 
     const modeConfig: GameMode = { type: modeType, targetLines, timeLimit };
     const engine = new GameEngine(modeConfig);
+    prevLevelRef.current = 1;
     if (modeType === 'practice' && cbRef.current?.practiceSequence?.length) {
       engine.setPracticeSequence(cbRef.current.practiceSequence, true);
     }
@@ -66,9 +80,14 @@ export function useGameEngine(mode: GameMode, callbacks?: GameEngineCallbacks) {
 
     engine.onStateChange = (state) => {
       setGameState({ ...state });
+      if (state.level > prevLevelRef.current) {
+        prevLevelRef.current = state.level;
+        sounds.onLevelUp();
+      }
       cbRef.current?.onStateTick?.(state);
     };
     engine.onClear = (result) => {
+      sounds.onClear(result);
       cbRef.current?.onClear?.(result);
     };
     engine.onGarbageSend = (lines) => {
@@ -79,25 +98,35 @@ export function useGameEngine(mode: GameMode, callbacks?: GameEngineCallbacks) {
       setIsActive(false);
       setIsFinished(true);
       setFinalState({ ...state });
+      sounds.onGameOver();
+      soundEngine.stopMusic();
     };
 
     engine.start();
     setIsActive(true);
     setIsFinished(false);
     setFinalState(null);
-  }, [modeType, targetLines, timeLimit]);
+
+    if (musicEnabled) {
+      soundEngine.setMusicVolume(musicVolume);
+      soundEngine.startMusic();
+    }
+  }, [modeType, targetLines, timeLimit, initAudio, sounds, musicEnabled, musicVolume]);
 
   const restartGame = useCallback(() => {
+    soundEngine.stopMusic();
     startGame();
   }, [startGame]);
 
   const receiveGarbage = useCallback((lines: number) => {
     engineRef.current?.receiveGarbage(lines);
-  }, []);
+    sounds.onGarbage(lines);
+  }, [sounds]);
 
   useEffect(() => {
     return () => {
       engineRef.current?.stop();
+      soundEngine.stopMusic();
     };
   }, []);
 
