@@ -1,17 +1,15 @@
-import type { GameState, ClearResult, ActivePiece, Board, PieceType } from '@/lib/game/types';
-import type { Lesson, LessonStep } from './lessons';
-import { BOARD_HEIGHT, GRAVITY_TABLE, LOCK_DELAY, MAX_LOCK_RESETS } from '@/lib/game/constants';
-import { getSpawnPosition } from '@/lib/game/tetrominos';
+import { GameState, ClearResult, ActivePiece, Board, PieceType, ClearType } from '@/lib/game/types';
+import { Lesson, LessonStep } from './lessons';
 import {
-  isValidPosition,
-  lockPiece,
-  clearLines,
-  tryRotate,
-  detectTSpin,
-  isPerfectClear,
-  getHardDropDistance,
+  BOARD_HEIGHT, BOARD_WIDTH, GRAVITY_TABLE,
+  LOCK_DELAY, MAX_LOCK_RESETS
+} from '@/lib/game/constants';
+import { getSpawnPosition, getPieceMatrix } from '@/lib/game/tetrominos';
+import {
+  createBoard, isValidPosition, lockPiece, clearLines,
+  tryRotate, getGhostPosition, detectTSpin, isPerfectClear,
+  getHardDropDistance
 } from '@/lib/game/board';
-import type { ClearType } from '@/lib/game/types';
 
 export type StepResult = 'success' | 'fail' | 'pending';
 
@@ -39,6 +37,7 @@ export class TrainingEngine {
   private feedbackMessage = '';
   private lessonComplete = false;
 
+  // Board state
   private board: Board;
   private activePiece: ActivePiece | null = null;
   private heldPiece: PieceType | null;
@@ -49,11 +48,12 @@ export class TrainingEngine {
   private isBackToBack = false;
   private piecesPlaced = 0;
   private startTime = Date.now();
-  private linesCleared = 0;
 
+  // Piece queue
   private pieceQueue: PieceType[];
   private queuePosition = 0;
 
+  // Timing
   private animFrame = 0;
   private lastTick = 0;
   private gravityAcc = 0;
@@ -64,23 +64,27 @@ export class TrainingEngine {
   private isPaused = false;
   private isGameOver = false;
 
+  // Hologram
   private showHologramActive = true;
 
+  // Callbacks
   onStateChange: (state: TrainingState) => void = () => {};
   onStepComplete: (index: number, result: StepResult) => void = () => {};
 
   constructor(lesson: Lesson) {
     this.lesson = lesson;
-    this.board = lesson.initialBoard.map((row) => [...row]) as Board;
+    this.board = lesson.initialBoard.map(row => [...row]) as Board;
     this.heldPiece = lesson.initialHold;
     this.pieceQueue = this.buildQueue(lesson.initialQueue);
     this.queuePosition = 0;
   }
 
+  // ── Queue ─────────────────────────────────────────────────────────────────
+  // Build a long queue: lesson's forced pieces first, then 7-bag shuffles
   private buildQueue(forced: PieceType[]): PieceType[] {
     const allPieces: PieceType[] = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
-    const queue = [...forced];
-    while (queue.length < 50) {
+    const queue: PieceType[] = [...forced];
+    while (queue.length < 60) {
       const bag = [...allPieces];
       for (let i = bag.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -92,15 +96,20 @@ export class TrainingEngine {
   }
 
   private nextPiece(): PieceType {
-    const piece = this.pieceQueue[this.queuePosition % this.pieceQueue.length];
+    const p = this.pieceQueue[this.queuePosition % this.pieceQueue.length];
     this.queuePosition++;
-    return piece;
+    return p;
   }
 
   private getNextQueuePreview(): PieceType[] {
-    return Array.from({ length: 5 }, (_, i) => this.pieceQueue[(this.queuePosition + i) % this.pieceQueue.length]);
+    return Array.from({ length: 5 }, (_, i) =>
+      this.pieceQueue[(this.queuePosition + i) % this.pieceQueue.length]
+    );
   }
 
+  // ── Hologram ──────────────────────────────────────────────────────────────
+  // Key fix: compute Y by actually simulating a drop from row 0
+  // This handles I piece correctly because we use isValidPosition properly
   private computeHologram(): HologramData | null {
     if (!this.showHologramActive) return null;
     if (this.stepResult !== 'pending') return null;
@@ -108,41 +117,68 @@ export class TrainingEngine {
     const step = this.getCurrentStep();
     if (!step) return null;
 
+    // Only show hologram when active piece matches the needed piece
+    if (!this.activePiece || this.activePiece.type !== step.neededPiece) return null;
+
     const target = step.targetPosition;
     const piece = step.neededPiece;
-    if (!this.activePiece || this.activePiece.type !== piece) return null;
 
+    // Create a test piece at target x and rotation, starting from top
+    // Then find the lowest y it can occupy (gravity drop simulation)
     const testPiece: ActivePiece = {
       type: piece,
       rotation: target.rotation,
-      position: { x: target.x, y: -2 },
+      position: { x: target.x, y: -4 }, // start above board
     };
 
-    let bestY = target.y;
-    let testY = -4;
-    while (testY < BOARD_HEIGHT) {
-      const test = { ...testPiece, position: { x: target.x, y: testY } };
-      if (!isValidPosition(this.board, test)) {
-        bestY = testY - 1;
+    // Check if this x+rotation is even valid on the current board
+    // Walk down from y=-4 to find the landing y
+    let landingY = -4;
+    let found = false;
+
+    for (let y = -4; y < BOARD_HEIGHT; y++) {
+      const probe = { ...testPiece, position: { x: target.x, y } };
+      const probeBelow = { ...testPiece, position: { x: target.x, y: y + 1 } };
+
+      if (!isValidPosition(this.board, probe)) {
+        // Can't be here at all — skip
+        continue;
+      }
+
+      if (!isValidPosition(this.board, probeBelow)) {
+        // This is the lowest valid y
+        landingY = y;
+        found = true;
         break;
       }
-      if (testY === BOARD_HEIGHT - 1) {
-        bestY = testY;
+
+      if (y === BOARD_HEIGHT - 1) {
+        landingY = y;
+        found = true;
         break;
       }
-      testY++;
     }
 
-    const holoPiece: ActivePiece = {
-      type: piece,
-      rotation: target.rotation,
-      position: { x: target.x, y: bestY },
-    };
-    if (!isValidPosition(this.board, holoPiece, 0, 0)) return null;
+    if (!found) return null;
+
+    // Validate final position is on the visible board (at least 1 cell visible)
+    const matrix = getPieceMatrix(piece, target.rotation);
+    let hasVisibleCell = false;
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        if (!matrix[r][c]) continue;
+        const by = landingY + r;
+        if (by >= 0 && by < BOARD_HEIGHT) {
+          hasVisibleCell = true;
+          break;
+        }
+      }
+    }
+    if (!hasVisibleCell) return null;
 
     return {
       x: target.x,
-      y: bestY,
+      y: landingY,
       rotation: target.rotation,
       piece,
     };
@@ -152,16 +188,17 @@ export class TrainingEngine {
     return this.lesson.steps[this.currentStepIndex] ?? null;
   }
 
+  // ── Piece spawning ────────────────────────────────────────────────────────
   private spawnNext(): void {
-    const type = this.nextPiece();
-    this.spawnPiece(type);
+    this.spawnPiece(this.nextPiece());
   }
 
   private spawnPiece(type: PieceType): void {
     const pos = getSpawnPosition(type);
     const piece: ActivePiece = { type, rotation: 0, position: pos };
 
-    if (!isValidPosition(this.board, piece) && !isValidPosition(this.board, piece, 0, -1)) {
+    if (!isValidPosition(this.board, piece) &&
+        !isValidPosition(this.board, piece, 0, -1)) {
       this.isGameOver = true;
       this.activePiece = null;
       this.emitState();
@@ -172,27 +209,30 @@ export class TrainingEngine {
     this.isOnGround = false;
     this.lockTimer = 0;
     this.lockResets = 0;
+    this.gravityAcc = 0;
     this.lastMoveWasRotation = false;
     this.emitState();
   }
 
+  // ── Lock and clear ────────────────────────────────────────────────────────
   private lockActive(): void {
     if (!this.activePiece) return;
 
-    const { isTSpin, isMiniTSpin } = detectTSpin(this.board, this.activePiece, this.lastMoveWasRotation);
+    const { isTSpin, isMiniTSpin } = detectTSpin(
+      this.board, this.activePiece, this.lastMoveWasRotation
+    );
+
     const newBoard = lockPiece(this.board, this.activePiece);
     const { board: clearedBoard, linesCleared } = clearLines(newBoard);
     this.board = clearedBoard;
     this.piecesPlaced++;
-    this.linesCleared += linesCleared;
     this.lines += linesCleared;
 
     const isPC = isPerfectClear(this.board);
     const isB2BEligible = linesCleared === 4 || (isTSpin && linesCleared > 0);
     const wasB2B = this.isBackToBack && isB2BEligible;
     this.isBackToBack = isB2BEligible;
-    if (linesCleared > 0) this.combo++;
-    else this.combo = -1;
+    if (linesCleared > 0) this.combo++; else this.combo = -1;
 
     const clearResult: ClearResult = {
       linesCleared,
@@ -209,19 +249,35 @@ export class TrainingEngine {
     this.activePiece = null;
     this.canHold = true;
     this.lastMoveWasRotation = false;
+    this.isOnGround = false;
+    this.lockTimer = 0;
+
     this.checkStepSuccess(clearResult, linesCleared, isTSpin, isMiniTSpin, isPC);
   }
 
-  private determineClearType(lines: number, isTSpin: boolean, isMini: boolean): ClearType {
+  private determineClearType(
+    lines: number, isTSpin: boolean, isMini: boolean
+  ): ClearType {
     if (isTSpin) {
       if (isMini) {
-        return lines === 1 ? 'tSpinMiniSingle' : lines === 2 ? 'tSpinMiniDouble' : 'tSpinMini';
+        return lines === 1 ? 'tSpinMiniSingle'
+             : lines === 2 ? 'tSpinMiniDouble'
+             : 'tSpinMini';
       }
-      return lines === 1 ? 'tSpinSingle' : lines === 2 ? 'tSpinDouble' : lines === 3 ? 'tSpinTriple' : 'none';
+      return lines === 1 ? 'tSpinSingle'
+           : lines === 2 ? 'tSpinDouble'
+           : lines === 3 ? 'tSpinTriple'
+           : 'none';
     }
-    return lines === 1 ? 'single' : lines === 2 ? 'double' : lines === 3 ? 'triple' : lines === 4 ? 'tetris' : 'none';
+    return lines === 1 ? 'single'
+         : lines === 2 ? 'double'
+         : lines === 3 ? 'triple'
+         : lines === 4 ? 'tetris'
+         : 'none';
   }
 
+  // ── Step success logic ────────────────────────────────────────────────────
+  // IMPORTANT: 'place' type only passes when the CORRECT piece (neededPiece) was placed
   private checkStepSuccess(
     result: ClearResult,
     linesCleared: number,
@@ -230,18 +286,26 @@ export class TrainingEngine {
     isPC: boolean
   ): void {
     const step = this.getCurrentStep();
+
     if (!step) {
+      // No more steps — just keep playing freely
       this.spawnNext();
       this.emitState();
       return;
     }
 
     const cond = step.successCondition;
+
+    // What piece was just placed? We track it before nulling activePiece
+    // We need to check this — store it in lockActive before nulling
+    // This is handled by lastPlacedPiece below
+    const placedPiece = this.lastPlacedPiece;
     let success = false;
 
     switch (cond.type) {
       case 'place':
-        success = true;
+        // Only pass if the correct piece was placed
+        success = placedPiece === step.neededPiece;
         break;
       case 'clear':
         success = linesCleared >= (cond.minLines || 1);
@@ -265,6 +329,7 @@ export class TrainingEngine {
       this.feedbackMessage = step.feedbackSuccess;
       this.isPaused = true;
       this.onStepComplete(this.currentStepIndex, 'success');
+      this.emitState();
 
       setTimeout(() => {
         this.currentStepIndex++;
@@ -281,11 +346,21 @@ export class TrainingEngine {
           this.emitState();
         }
       }, 1500);
+
     } else {
-      if (linesCleared > 0 || cond.type === 'place') {
+      // Fail feedback only if:
+      // - They placed the right piece type but in the wrong way (for tspin/clear conditions)
+      // - OR it was a 'place' condition and wrong piece
+      const shouldShowFail = (
+        (cond.type !== 'place' && (linesCleared > 0 || isTSpin)) ||
+        (cond.type === 'place' && placedPiece === step.neededPiece)
+      );
+
+      if (shouldShowFail) {
         this.stepResult = 'fail';
         this.feedbackMessage = step.feedbackFail;
         this.isPaused = true;
+        this.emitState();
 
         setTimeout(() => {
           if (this.stepResult === 'fail') {
@@ -297,13 +372,17 @@ export class TrainingEngine {
           }
         }, 2500);
       } else {
+        // Silently keep going — wrong piece placed, no feedback
         this.spawnNext();
+        this.emitState();
       }
     }
-
-    this.emitState();
   }
 
+  // Track what piece was just locked (set right before nulling activePiece)
+  private lastPlacedPiece: PieceType = 'T';
+
+  // ── State emission ────────────────────────────────────────────────────────
   private emitState(): void {
     const gameState: GameState = {
       board: this.board,
@@ -324,7 +403,6 @@ export class TrainingEngine {
       piecesPlaced: this.piecesPlaced,
     };
 
-    const hologram = this.computeHologram();
     this.onStateChange({
       gameState,
       currentStep: this.currentStepIndex,
@@ -332,14 +410,15 @@ export class TrainingEngine {
       stepResult: this.stepResult,
       feedbackMessage: this.feedbackMessage,
       lessonComplete: this.lessonComplete,
-      hologram,
+      hologram: this.computeHologram(),
     });
   }
 
+  // ── Game loop — SLOW gravity for training, lock delay active ──────────────
   private loop = (now: number): void => {
     if (this.isGameOver) return;
 
-    const delta = now - this.lastTick;
+    const delta = Math.min(now - this.lastTick, 100); // cap delta so tab focus doesn't cause instant drop
     this.lastTick = now;
 
     if (!this.isPaused && this.activePiece) {
@@ -348,7 +427,10 @@ export class TrainingEngine {
       if (onGround) {
         this.isOnGround = true;
         this.lockTimer += delta;
+
+        // Lock after LOCK_DELAY ms of sitting on ground
         if (this.lockTimer >= LOCK_DELAY) {
+          this.lastPlacedPiece = this.activePiece.type;
           this.lockActive();
           this.animFrame = requestAnimationFrame(this.loop);
           return;
@@ -356,14 +438,19 @@ export class TrainingEngine {
       } else {
         this.isOnGround = false;
         this.lockTimer = 0;
+
+        // Very slow gravity for training (level 1)
         this.gravityAcc += delta;
-        const gravMs = GRAVITY_TABLE[1];
+        const gravMs = GRAVITY_TABLE[1]; // 1000ms per row
         while (this.gravityAcc >= gravMs) {
           this.gravityAcc -= gravMs;
           if (isValidPosition(this.board, this.activePiece, 0, 1)) {
             this.activePiece = {
               ...this.activePiece,
-              position: { ...this.activePiece.position, y: this.activePiece.position.y + 1 },
+              position: {
+                ...this.activePiece.position,
+                y: this.activePiece.position.y + 1,
+              },
             };
           }
         }
@@ -375,6 +462,7 @@ export class TrainingEngine {
     this.animFrame = requestAnimationFrame(this.loop);
   };
 
+  // ── Public API ────────────────────────────────────────────────────────────
   start(): void {
     this.spawnNext();
     this.lastTick = performance.now();
@@ -383,7 +471,9 @@ export class TrainingEngine {
 
   restart(): void {
     cancelAnimationFrame(this.animFrame);
-    this.board = this.lesson.initialBoard.map((row) => [...row]) as Board;
+
+    // Reset ALL state to initial
+    this.board = this.lesson.initialBoard.map(row => [...row]) as Board;
     this.heldPiece = this.lesson.initialHold;
     this.canHold = true;
     this.activePiece = null;
@@ -400,11 +490,14 @@ export class TrainingEngine {
     this.combo = -1;
     this.isBackToBack = false;
     this.lines = 0;
-    this.linesCleared = 0;
     this.piecesPlaced = 0;
     this.startTime = Date.now();
+    this.lastMoveWasRotation = false;
+
+    // Fresh queue each restart for variety
     this.pieceQueue = this.buildQueue(this.lesson.initialQueue);
     this.queuePosition = 0;
+
     this.start();
   }
 
@@ -417,6 +510,7 @@ export class TrainingEngine {
     this.emitState();
   }
 
+  // ── Input ─────────────────────────────────────────────────────────────────
   moveLeft(): void {
     if (!this.activePiece || this.isPaused || this.isGameOver) return;
     if (isValidPosition(this.board, this.activePiece, -1, 0)) {
@@ -455,36 +549,49 @@ export class TrainingEngine {
     }
   }
 
+  // SONIC DROP: teleport to ghost position but DO NOT lock — wait for lock delay
+  // This is what you want: Space = drop instantly, but piece stays there
+  // and only locks after LOCK_DELAY or when you press Space again
   hardDrop(): void {
     if (!this.activePiece || this.isPaused || this.isGameOver) return;
+
     const dist = getHardDropDistance(this.board, this.activePiece);
+    if (dist === 0) {
+      // Already on ground — lock now (second Space press)
+      this.lastPlacedPiece = this.activePiece.type;
+      this.lockActive();
+      return;
+    }
+
+    // Teleport to bottom
     this.activePiece = {
       ...this.activePiece,
-      position: { ...this.activePiece.position, y: this.activePiece.position.y + dist },
+      position: {
+        ...this.activePiece.position,
+        y: this.activePiece.position.y + dist,
+      },
     };
+
+    // Start lock timer immediately (piece is now on ground)
+    this.isOnGround = true;
+    this.lockTimer = 0;
+    this.gravityAcc = 0;
     this.emitState();
-    this.lockActive();
+    // Piece will lock after LOCK_DELAY via the game loop
+    // Player can still rotate/move during this window
   }
 
-  rotateClockwise(): void {
-    this.rotate(1);
-  }
-
-  rotateCounter(): void {
-    this.rotate(-1);
-  }
-
-  rotate180(): void {
-    this.rotate(2);
-  }
+  rotateClockwise(): void { this.rotate(1); }
+  rotateCounter(): void { this.rotate(-1); }
+  rotate180(): void { this.rotate(2); }
 
   hold(): void {
     if (!this.activePiece || !this.canHold || this.isPaused || this.isGameOver) return;
     const toHold = this.activePiece.type;
     if (this.heldPiece) {
-      const swap = this.heldPiece;
+      const swapIn = this.heldPiece;
       this.heldPiece = toHold;
-      this.spawnPiece(swap);
+      this.spawnPiece(swapIn);
     } else {
       this.heldPiece = toHold;
       this.spawnNext();
