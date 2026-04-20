@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { GameEngine } from '@/lib/game/engine';
-import type { GameState, GameMode, PieceType } from '@/lib/game/types';
+import type { GameState, GameMode, PieceType, ClearResult } from '@/lib/game/types';
 import { useSettingsStore } from '@/store/settingsStore';
 import { createIrsInputRef, useGameInput, type IrsInputRef } from './useGameInput';
 
@@ -10,6 +10,8 @@ export type GameEngineCallbacks = {
   onGarbageSend?: (lines: number) => void;
   /** Called after every engine state tick (throttle board sync in your handler) */
   onStateTick?: (state: GameState) => void;
+  /** Called when a lock generates a clear result. */
+  onClear?: (result: ClearResult) => void;
   /** Optional fixed sequence for practice/training modes. */
   practiceSequence?: PieceType[];
 };
@@ -66,7 +68,9 @@ export function useGameEngine(mode: GameMode, callbacks?: GameEngineCallbacks) {
       setGameState({ ...state });
       cbRef.current?.onStateTick?.(state);
     };
-    engine.onClear = () => {};
+    engine.onClear = (result) => {
+      cbRef.current?.onClear?.(result);
+    };
     engine.onGarbageSend = (lines) => {
       cbRef.current?.onGarbageSend?.(lines);
     };

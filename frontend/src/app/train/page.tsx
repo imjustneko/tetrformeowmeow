@@ -17,7 +17,7 @@ import { NextQueue } from '@/components/game/NextQueue';
 import { GameHUD } from '@/components/game/GameHUD';
 import { BOARD_HEIGHT, HIDDEN_ROWS } from '@/lib/game/constants';
 import { GarbageMeter } from '@/components/game/GarbageMeter';
-import type { PieceType, Board } from '@/lib/game/types';
+import type { PieceType, Board, ClearResult } from '@/lib/game/types';
 import { getPieceMatrix } from '@/lib/game/tetrominos';
 import { PIECE_COLORS } from '@/lib/game/constants';
 
@@ -25,6 +25,7 @@ type Drill = {
   id: string;
   title: string;
   description: string;
+  completionRule: 'tspinClear' | 'lineClear';
   steps: Array<{
     piece: PieceType;
     instruction: string;
@@ -37,6 +38,7 @@ const DRILLS: Drill[] = [
     id: 't-spin-slot',
     title: 'T-Spin Slot Builder',
     description: 'Learn to leave a T-slot, stack around it, then rotate T into the gap.',
+    completionRule: 'tspinClear',
     steps: [
       {
         piece: 'J',
@@ -52,10 +54,10 @@ const DRILLS: Drill[] = [
         piece: 'L',
         instruction: 'Step 2: Build right wall while preserving a center cavity.',
         hologramCells: [
-          { x: 7, y: 17 },
-          { x: 5, y: 18 },
-          { x: 6, y: 18 },
           { x: 7, y: 18 },
+          { x: 5, y: 19 },
+          { x: 6, y: 19 },
+          { x: 7, y: 19 },
         ],
       },
       {
@@ -70,12 +72,12 @@ const DRILLS: Drill[] = [
       },
       {
         piece: 'T',
-        instruction: 'Step 4: Rotate T into the prepared center slot (your spin finish).',
+        instruction: 'Step 4: Rotate T into the prepared center slot and clear (required).',
         hologramCells: [
-          { x: 4, y: 17 },
-          { x: 3, y: 18 },
           { x: 4, y: 18 },
-          { x: 5, y: 18 },
+          { x: 3, y: 19 },
+          { x: 4, y: 19 },
+          { x: 5, y: 19 },
         ],
       },
     ],
@@ -84,6 +86,7 @@ const DRILLS: Drill[] = [
     id: 'sz-spin-slot',
     title: 'S/Z Spin Setup',
     description: 'Create an overhang cavity, then slide S/Z into the pocket by rotation.',
+    completionRule: 'lineClear',
     steps: [
       {
         piece: 'J',
@@ -99,30 +102,30 @@ const DRILLS: Drill[] = [
         piece: 'O',
         instruction: 'Step 2: Add support blocks and keep a 2-cell channel open.',
         hologramCells: [
-          { x: 7, y: 17, color: 'rgba(255, 220, 0, 0.22)' },
-          { x: 8, y: 17, color: 'rgba(255, 220, 0, 0.22)' },
           { x: 7, y: 18, color: 'rgba(255, 220, 0, 0.22)' },
           { x: 8, y: 18, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 7, y: 19, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 8, y: 19, color: 'rgba(255, 220, 0, 0.22)' },
         ],
       },
       {
         piece: 'L',
         instruction: 'Step 3: Build an overhang so S/Z has to rotate into place.',
         hologramCells: [
-          { x: 5, y: 16, color: 'rgba(255, 220, 0, 0.22)' },
-          { x: 3, y: 17, color: 'rgba(255, 220, 0, 0.22)' },
-          { x: 4, y: 17, color: 'rgba(255, 220, 0, 0.22)' },
-          { x: 5, y: 17, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 5, y: 18, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 3, y: 19, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 4, y: 19, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 5, y: 19, color: 'rgba(255, 220, 0, 0.22)' },
         ],
       },
       {
         piece: 'S',
-        instruction: 'Step 4: Rotate S into the highlighted cavity (spin-fit finish).',
+        instruction: 'Step 4: Rotate S into the highlighted cavity and take a line clear.',
         hologramCells: [
-          { x: 4, y: 15, color: 'rgba(255, 220, 0, 0.22)' },
-          { x: 5, y: 15, color: 'rgba(255, 220, 0, 0.22)' },
-          { x: 3, y: 16, color: 'rgba(255, 220, 0, 0.22)' },
-          { x: 4, y: 16, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 4, y: 18, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 5, y: 18, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 3, y: 19, color: 'rgba(255, 220, 0, 0.22)' },
+          { x: 4, y: 19, color: 'rgba(255, 220, 0, 0.22)' },
         ],
       },
     ],
@@ -131,6 +134,7 @@ const DRILLS: Drill[] = [
     id: 'lj-spin-slot',
     title: 'L/J Spin Slot',
     description: 'Practice creating a side pocket and rotating L/J into that narrow gap.',
+    completionRule: 'lineClear',
     steps: [
       {
         piece: 'O',
@@ -154,12 +158,12 @@ const DRILLS: Drill[] = [
       },
       {
         piece: 'J',
-        instruction: 'Step 3: Rotate J into the pocket (L/J spin concept).',
+        instruction: 'Step 3: Rotate J into the pocket and clear (required).',
         hologramCells: [
-          { x: 0, y: 16, color: 'rgba(130, 200, 255, 0.22)' },
-          { x: 0, y: 17, color: 'rgba(130, 200, 255, 0.22)' },
-          { x: 1, y: 17, color: 'rgba(130, 200, 255, 0.22)' },
-          { x: 2, y: 17, color: 'rgba(130, 200, 255, 0.22)' },
+          { x: 0, y: 18, color: 'rgba(130, 200, 255, 0.22)' },
+          { x: 0, y: 19, color: 'rgba(130, 200, 255, 0.22)' },
+          { x: 1, y: 19, color: 'rgba(130, 200, 255, 0.22)' },
+          { x: 2, y: 19, color: 'rgba(130, 200, 255, 0.22)' },
         ],
       },
     ],
@@ -168,6 +172,7 @@ const DRILLS: Drill[] = [
     id: 'i-spin-well',
     title: 'I-Spin Well Control',
     description: 'Learn to leave a clean left well, build around it, then drop I for efficient scoring.',
+    completionRule: 'lineClear',
     steps: [
       {
         piece: 'L',
@@ -242,6 +247,7 @@ export default function TrainPage() {
   const cellSize = usePlayfieldCellSize();
   const previousPlacedRef = useRef(0);
   const previousBoardRef = useRef<Board | null>(null);
+  const lastClearRef = useRef<ClearResult | null>(null);
 
   const { gameState, isActive, isFinished, finalState, startGame, restartGame, engineRef } = useGameEngine(mode, {
     practiceSequence: remainingGuidedPieces,
@@ -256,6 +262,19 @@ export default function TrainPage() {
       if (placedCorrectly) {
         const nextStep = currentStepIndex + 1;
         if (nextStep >= selectedDrill.steps.length) {
+          const clear = lastClearRef.current;
+          const clearOk =
+            selectedDrill.completionRule === 'tspinClear'
+              ? Boolean(clear?.isTSpin && (clear?.linesCleared ?? 0) > 0)
+              : Boolean((clear?.linesCleared ?? 0) > 0);
+          if (!clearOk) {
+            setStepFeedback(
+              selectedDrill.completionRule === 'tspinClear'
+                ? 'Final step must be a real T-Spin line clear. Try again and rotate into the slot.'
+                : 'Final step must clear at least one line. Build the space and finish into the gap.'
+            );
+            return;
+          }
           setIsCompleted(true);
           setStepFeedback('Great job! Drill completed correctly.');
           return;
@@ -265,6 +284,9 @@ export default function TrainPage() {
       } else {
         setStepFeedback('Not quite right. Keep the same piece and place it on the highlighted hologram cells.');
       }
+    },
+    onClear: (clear) => {
+      lastClearRef.current = clear;
     },
   });
 
@@ -300,6 +322,7 @@ export default function TrainPage() {
     setStepFeedback('');
     previousPlacedRef.current = 0;
     previousBoardRef.current = null;
+    lastClearRef.current = null;
     startGame();
   }
 
@@ -309,6 +332,7 @@ export default function TrainPage() {
     setStepFeedback('');
     previousPlacedRef.current = 0;
     previousBoardRef.current = null;
+    lastClearRef.current = null;
     restartGame();
   }
 
